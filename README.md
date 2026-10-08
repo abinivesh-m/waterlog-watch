@@ -29,6 +29,8 @@ Waterlog Watch turns every phone into a flood sensor:
 
 The full app UI is available in **Tamil, Hindi and English**, with first-launch onboarding.
 
+![Architecture](docs/architecture.png)
+
 ## Architecture (100% AWS serverless)
 
 ```

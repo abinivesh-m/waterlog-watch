@@ -19,3 +19,5 @@ app/android/.gradle/
 *.iml
 .env
 app/android/build/
+
+app/android/build/
