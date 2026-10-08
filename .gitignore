@@ -18,3 +18,4 @@ app/android/.gradle/
 .idea/
 *.iml
 .env
+app/android/build/

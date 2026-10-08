@@ -3,6 +3,12 @@
 **Crowd-sourced, AI-verified street flooding alerts for Indian cities.**
 Built for the Bharat Builds Tour, Environmental Hacks: **Heat and Water** track.
 
+**Live on AWS (ap-south-1):** API `https://lwj4clgh53.execute-api.ap-south-1.amazonaws.com` · [Ward dashboard](https://lwj4clgh53.execute-api.ap-south-1.amazonaws.com/dashboard) · [API docs](https://lwj4clgh53.execute-api.ap-south-1.amazonaws.com/docs)
+
+> **Note:** our AWS account is still finishing verification, which currently blocks Amazon Bedrock at the account
+> level. The backend tries Bedrock first and falls back to Gemini only if Bedrock refuses. Each report records which
+> model was used (`ai_provider`), and Bedrock takes over automatically once the account is verified.
+
 Every monsoon, Chennai, Mumbai, Bengaluru and Delhi commuters drive into knee-deep water with no warning.
 Two-wheelers stall, people fall into hidden open drains, and ambulances get stuck. Official flood maps are
 coarse, and WhatsApp forwards are unverified and outdated.
@@ -52,6 +58,7 @@ All infrastructure is defined in [`template.yaml`](template.yaml) (AWS SAM) and 
 | **Amazon DynamoDB** | Stores reports. A geohash GSI finds nearby spots; TTL removes stale floods |
 | **Amazon S3** | Private photo storage with presigned URLs and auto-deletion after 7 days |
 | **Amazon Rekognition** | Blocks unsafe or explicit images before they are posted publicly |
+| **Amazon Location Service** | Real road routes (scooter, car, walking) for the route check |
 | **Amazon CloudWatch + AWS X-Ray** | Structured JSON logs, an error alarm, and end-to-end request tracing |
 | **AWS SAM / CloudFormation** | Infrastructure as code |
 
@@ -70,11 +77,17 @@ Interactive docs: `<ApiUrl>/docs`
 
 ## Run it
 
-### 1. Deploy the backend (AWS CloudShell, no local setup)
+### 1. Deploy the backend
+**With AWS CloudShell / SAM CLI:**
 ```bash
-git clone <this repo> && cd waterlog-watch
-sam build && sam deploy --guided --region ap-south-1   # stack name: waterlog-watch
+git clone https://github.com/abinivesh-m/waterlog-watch.git && cd waterlog-watch
+pip3 install -r backend/requirements.txt -t backend/ --platform manylinux2014_x86_64 --python-version 3.12 --only-binary=:all:
+sam deploy --template-file template.yaml --stack-name waterlog-watch --region ap-south-1 --resolve-s3 \
+  --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND
 ```
+**Without a shell (how we deployed):** zip `backend/` together with its dependencies (Linux, Python 3.12), upload it to an S3
+bucket, then create a CloudFormation stack from `template.yaml`, with `CodeUri` pointing at that S3 object.
+
 Copy the `ApiUrl` output.
 
 ### 2. Build the Android app
@@ -106,3 +119,6 @@ cd backend && pip install -r requirements-dev.txt && pytest -q
 
 ## Team
 Abinivesh M
+
+## AI tools used
+Claude (Anthropic) helped generate code, set up the AWS deployment and write the docs.
