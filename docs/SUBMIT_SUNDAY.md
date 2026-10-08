@@ -13,7 +13,7 @@ Do it as soon as the form opens. It takes about 5 minutes. The form closes at th
 | Live demo / dashboard | https://lwj4clgh53.execute-api.ap-south-1.amazonaws.com/dashboard |
 | AWS services used | Lambda, API Gateway (HTTP API), DynamoDB, S3, Amazon Location Service, Amazon Bedrock, Amazon Rekognition, CloudWatch, X-Ray, CloudFormation/SAM |
 | Write-up | Paste all of `docs/WRITEUP.md` |
-| AI tools used | Claude (coding assistance). Designed and built by Abinivesh M |
+| AI tools used | Designed and built by Abinivesh M. Used Claude for coding assistance. |
 | Blog link (bonus) | https://builder.aws.com/content/3KOwALE7mzZeZ48dh80pCBmr6Ci/waterlog-watch-ai-verified-flood-alerts-on-aws |
 
 ## Before you click Submit
