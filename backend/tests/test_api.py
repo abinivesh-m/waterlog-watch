@@ -91,14 +91,42 @@ def test_votes_clear_report(client):
     assert client.post("/reports/nope/vote", json={"device_id": "dev-x", "vote": "cleared"}).status_code == 404
 
 
-def test_route_check(client):
+def test_route_check_straight_line_fallback(client, monkeypatch):
+    # No Amazon Location in moto: the client errors and route-check falls back to a straight line.
+    from app import routing
+    monkeypatch.setattr(routing, "_client", None)
     post(client, TNAGAR)
     on = client.get("/route-check", params={"from_lat": 13.06, "from_lng": 80.24,
-                                            "to_lat": GUINDY[0], "to_lng": GUINDY[1]}).json()
-    assert on["verdict"] == "avoid" and len(on["spots"]) == 1
+                                            "to_lat": GUINDY[0], "to_lng": GUINDY[1], "buffer_m": 300}).json()
+    assert on["routing_source"] == "straight-line" and on["verdict"] == "avoid" and len(on["spots"]) == 1
     off = client.get("/route-check", params={"from_lat": 13.08, "from_lng": 80.27,
                                              "to_lat": 13.09, "to_lng": 80.28}).json()
     assert off["verdict"] == "clear" and off["spots"] == []
+
+
+def test_route_check_follows_road_and_mode(client, monkeypatch):
+    from app import routing
+    # Fake Amazon Location response: an L-shaped road that passes T. Nagar, unlike the straight line.
+    road = [[13.0418, 80.2200], [13.0418, 80.2341], [13.0300, 80.2341], [13.0200, 80.2341]]
+
+    class FakeRoutes:
+        def calculate_routes(self, **kw):
+            assert kw["Origin"] == [80.22, 13.0418] and kw["TravelMode"] in ("Car", "Scooter")
+            return {"Routes": [{"Legs": [{"Geometry": {"LineString": [[lng, lat] for lat, lng in road]}}],
+                                "Summary": {"Distance": 3400, "Duration": 540}}]}
+
+    monkeypatch.setattr(routing, "_client", FakeRoutes())
+    monkeypatch.setattr(ai, "assess_photo", lambda *a, **k: ai.normalise(
+        {**KNEE, "severity": 3, "passable": {"pedestrian": True, "two_wheeler": False, "car": True}}))
+    post(client, TNAGAR)
+    params = {"from_lat": 13.0418, "from_lng": 80.2200, "to_lat": 13.0200, "to_lng": 80.2341}
+    car = client.get("/route-check", params={**params, "mode": "car"}).json()
+    assert car["routing_source"] == "amazon-location" and car["duration_s"] == 540 and len(car["path"]) == 4
+    assert car["verdict"] == "caution" and car["spots"][0]["blocks_mode"] is False
+    assert 1400 < car["spots"][0]["distance_m"] < 1600   # measured along the road, not as the crow flies
+    scooter = client.get("/route-check", params={**params, "mode": "scooter"}).json()
+    assert scooter["verdict"] == "avoid" and scooter["blocked_spots"] == 1
+    assert client.get("/route-check", params={**params, "mode": "boat"}).status_code == 422
 
 
 def test_bad_inputs(client):

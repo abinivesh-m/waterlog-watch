@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Waterlog Watch - crowd-sourced, AI-verified street flooding alerts (API Gateway, Lambda, Bedrock, Rekognition, S3, DynamoDB, CloudWatch, X-Ray)
+Description: Waterlog Watch - crowd-sourced, AI-verified street flooding alerts (API Gateway, Lambda, Bedrock, Rekognition, Location Service, S3, DynamoDB, CloudWatch, X-Ray)
 
 Parameters:
   BedrockModelId:
@@ -80,6 +80,9 @@ Resources:
             - Effect: Allow
               Action: [rekognition:DetectModerationLabels]
               Resource: "*"
+            - Effect: Allow
+              Action: [geo-routes:CalculateRoutes]
+              Resource: !Sub arn:aws:geo-routes:${AWS::Region}::provider/default
       LoggingConfig:
         LogFormat: JSON
         LogGroup: !Ref ApiLogGroup

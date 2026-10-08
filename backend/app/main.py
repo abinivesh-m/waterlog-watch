@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import ai, config, geo, storage
+from . import ai, config, geo, routing, storage
 
 class _JsonFormatter(logging.Formatter):
     """One JSON object per line so CloudWatch Logs Insights can query fields."""
@@ -167,34 +167,61 @@ def vote(report_id: str, body: VoteIn):
     return public(r)
 
 
+PASS_KEY = {"car": "car", "scooter": "two_wheeler", "pedestrian": "pedestrian"}
+
+
 @app.get("/route-check")
-def route_check(from_lat: float, from_lng: float, to_lat: float, to_lng: float,
-                buffer_m: float = Query(250, gt=0, le=2000)):
-    """Waterlogged spots within buffer_m of the straight line between two points."""
-    length = geo.haversine_m(from_lat, from_lng, to_lat, to_lng)
-    if length > 40_000:
+def route_check(from_lat: float = Query(..., ge=-90, le=90), from_lng: float = Query(..., ge=-180, le=180),
+                to_lat: float = Query(..., ge=-90, le=90), to_lng: float = Query(..., ge=-180, le=180),
+                mode: str = Query("car", pattern="^(car|scooter|pedestrian)$"),
+                buffer_m: float = Query(60, gt=0, le=500)):
+    """Real road route (Amazon Location Service) checked against every active flood report on it.
+
+    A spot counts as "on route" if it is within buffer_m of the road path. The verdict is
+    mode-aware: a knee-deep spot blocks a scooter but not necessarily a car.
+    """
+    if geo.haversine_m(from_lat, from_lng, to_lat, to_lng) > 40_000:
         raise HTTPException(400, "Route check supports trips up to 40 km")
-    mid_lat, mid_lng = (from_lat + to_lat) / 2, (from_lng + to_lng) / 2
-    candidates = _active_near(mid_lat, mid_lng, length / 2 + buffer_m)
+    route = routing.road_route(from_lat, from_lng, to_lat, to_lng, mode)
+    path = route["path"]
+
+    # Only query geohash cells along the path (sampled about every 1.5 km), not a giant circle.
+    cells, walked = set(), 0.0
+    cells |= geo.cells_covering(path[0][0], path[0][1], buffer_m + 500)
+    for i in range(1, len(path)):
+        walked += geo.haversine_m(path[i - 1][0], path[i - 1][1], path[i][0], path[i][1])
+        if walked >= 1500 or i == len(path) - 1:
+            cells |= geo.cells_covering(path[i][0], path[i][1], buffer_m + 500)
+            walked = 0.0
+    now = int(time.time())
+    candidates = [r for r in storage.reports_in_cells(cells, now - config.REPORT_TTL_HOURS * 3600 * 4)
+                  if r.get("status") == "active" and r.get("expires_at", 0) > now]
+
     on_route = []
     for r in candidates:
-        d = geo.distance_to_segment_m(r["lat"], r["lng"], from_lat, from_lng, to_lat, to_lng)
-        if d <= buffer_m:
+        off, seg = routing.distance_to_path_m(r["lat"], r["lng"], path)
+        if off <= buffer_m:
             item = public(r, (from_lat, from_lng))
-            item["off_route_m"] = round(d)
+            item["distance_m"] = round(routing.distance_along_m(path, seg)
+                                       + geo.haversine_m(path[seg][0], path[seg][1], r["lat"], r["lng"]))
+            item["off_route_m"] = round(off)
+            item["blocks_mode"] = not (r.get("passable") or {}).get(PASS_KEY[mode], True)
             on_route.append(item)
     on_route.sort(key=lambda x: x["distance_m"])
+
     worst = max((x["severity"] for x in on_route), default=0)
-    if worst >= 4:
-        verdict, advice = "avoid", "Dangerous waterlogging on this route. Take another road or wait."
+    blocked = sum(1 for x in on_route if x["blocks_mode"])
+    if blocked or worst >= 4:
+        verdict, advice = "avoid", "Flooding on this route is not passable for you. Take another road or wait."
     elif worst == 3:
-        verdict, advice = "caution", "Waterlogging on this route. Two-wheelers should avoid it."
+        verdict, advice = "caution", "Waterlogging on this route. Go slowly and watch for open drains."
     elif worst:
         verdict, advice = "minor", "Minor water on this route. Drive slowly."
     else:
         verdict, advice = "clear", "No waterlogging reported on this route."
-    return {"verdict": verdict, "advice": advice, "worst_severity": worst,
-            "route_length_m": round(length), "spots": on_route}
+    return {"verdict": verdict, "advice": advice, "worst_severity": worst, "blocked_spots": blocked,
+            "mode": mode, "route_length_m": route["distance_m"], "duration_s": route["duration_s"],
+            "routing_source": route["source"], "path": path, "spots": on_route}
 
 
 @app.get("/stats")
