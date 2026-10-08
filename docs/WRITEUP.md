@@ -44,3 +44,8 @@ data feed for the Greater Chennai Corporation's command centre.
 
 ## AI tools used
 Designed and built by Abinivesh M. Used Claude for coding assistance.
+
+## Credits
+- Demo flood photos: "India - Chennai - Monsoon" series by McKay Savage, via Wikimedia Commons, licensed CC BY 2.0 (https://creativecommons.org/licenses/by/2.0/). Used only for the reports labelled [Demo].
+- Map tiles and data: (c) OpenStreetMap contributors (ODbL).
+- Open-source libraries: FastAPI, Mangum, Pydantic (MIT), Leaflet (BSD-2), Flutter and its packages (BSD and MIT licences).
