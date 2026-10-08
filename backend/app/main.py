@@ -5,15 +5,39 @@ Amazon S3 (photos), Amazon DynamoDB (reports, geohash index, TTL expiry).
 """
 import base64
 import binascii
+import json
+import logging
 import time
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from . import ai, config, geo, storage
 
-app = FastAPI(title="Waterlog Watch API", version="1.0.0")
+class _JsonFormatter(logging.Formatter):
+    """One JSON object per line so CloudWatch Logs Insights can query fields."""
+    _skip = set(vars(logging.makeLogRecord({})))
+
+    def format(self, record):
+        data = {"level": record.levelname, "msg": record.getMessage()}
+        data.update({k: v for k, v in vars(record).items() if k not in self._skip and k != "message"})
+        return json.dumps(data, default=str)
+
+
+log = logging.getLogger("waterlog")
+if not log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(_JsonFormatter())
+    log.addHandler(_h)
+log.setLevel(logging.INFO)
+log.propagate = False
+
+app = FastAPI(title="Waterlog Watch API", version="1.1.0",
+              description="Crowd-sourced, AI-verified street flooding alerts. Built on AWS.")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 PUBLIC_FIELDS = ("id", "lat", "lng", "created_at", "updated_at", "status", "note", "is_waterlogging",
@@ -57,7 +81,16 @@ class VoteIn(BaseModel):
 
 @app.get("/")
 def root():
-    return {"service": "Waterlog Watch API", "docs": "/docs", "health": "/health"}
+    return {"service": "Waterlog Watch API", "docs": "/docs", "dashboard": "/dashboard", "health": "/health"}
+
+
+_DASHBOARD = (Path(__file__).parent / "dashboard.html").read_text(encoding="utf-8")
+
+
+@app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+def dashboard():
+    """Live command dashboard for ward officers (map + ranked list). ?lat=&lng=&radius_km="""
+    return _DASHBOARD
 
 
 @app.get("/health")
@@ -77,11 +110,22 @@ def create_report(body: ReportIn):
         raise HTTPException(413, "Photo is too large (max 4 MB)")
 
     try:
+        ai.image_format(image)
+    except ai.AssessmentError as e:
+        raise HTTPException(400, str(e))
+    if ai.moderate(image):
+        log.info("report_rejected", extra={"reason": "moderation"})
+        raise HTTPException(422, "This photo can't be posted publicly. Please photograph the street only.")
+
+    started = time.time()
+    try:
         assessment = ai.assess_photo(image, body.note, body.lang)
     except ai.AssessmentError as e:
         msg = str(e)
         raise HTTPException(400 if msg.startswith("Unsupported") else 503, msg)
 
+    log.info("assessed", extra={"ms": int((time.time() - started) * 1000), "severity": assessment["severity"],
+                                "flood": assessment["is_waterlogging"]})
     if not assessment["is_waterlogging"]:
         raise HTTPException(422, assessment["summary"] or "This photo doesn't look like a waterlogged street.")
 

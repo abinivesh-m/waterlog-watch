@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Waterlog Watch - crowd-sourced, AI-verified street flooding alerts (API Gateway + Lambda + Bedrock + S3 + DynamoDB)
+Description: Waterlog Watch - crowd-sourced, AI-verified street flooding alerts (API Gateway, Lambda, Bedrock, Rekognition, S3, DynamoDB, CloudWatch, X-Ray)
 
 Parameters:
   BedrockModelId:
@@ -17,6 +17,7 @@ Globals:
     Architectures: [x86_64]
     MemorySize: 1024
     Timeout: 29
+    Tracing: Active            # AWS X-Ray: see Bedrock / DynamoDB / S3 latency per request
 
 Resources:
   PhotosBucket:
@@ -72,15 +73,40 @@ Resources:
         - S3CrudPolicy: {BucketName: !Ref PhotosBucket}
         - Statement:
             - Effect: Allow
-              Action: [bedrock:InvokeModel, bedrock:Converse]
+              Action: [bedrock:InvokeModel]
               Resource:
                 - arn:aws:bedrock:*::foundation-model/*
                 - !Sub arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*
+            - Effect: Allow
+              Action: [rekognition:DetectModerationLabels]
+              Resource: "*"
+      LoggingConfig:
+        LogFormat: JSON
+        LogGroup: !Ref ApiLogGroup
       Events:
         Api:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 14
+
+  ApiErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Waterlog Watch API Lambda is throwing errors
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref ApiFunction}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
 
   HttpApi:
     Type: AWS::Serverless::HttpApi
@@ -94,6 +120,9 @@ Resources:
         ThrottlingRateLimit: 20
 
 Outputs:
+  DashboardUrl:
+    Description: Live command dashboard for ward officers
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/dashboard
   ApiUrl:
     Description: Base URL for the Flutter app
     Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com

@@ -1,8 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'map_screen.dart';
+import 'onboarding_screen.dart';
 
-void main() => runApp(const WaterlogWatchApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  await settings.load();
+  runApp(const WaterlogWatchApp());
+}
 
 /// Severity 1..5 -> colour used for pins, chips and banners.
 Color severityColor(int s) => switch (s) {
@@ -13,12 +21,31 @@ Color severityColor(int s) => switch (s) {
       _ => const Color(0xFF43A047),
     };
 
-/// Shared app state: preferred language for AI summaries.
+/// Text colour that stays readable on top of [severityColor].
+Color onSeverity(int s) => s == 2 ? Colors.black87 : Colors.white;
+
+/// App-wide settings, persisted on the device.
 class AppSettings extends ChangeNotifier {
   String lang = 'ta';
-  void setLang(String l) {
+  bool onboarded = false;
+
+  Future<void> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    lang = prefs.getString('lang') ?? 'ta';
+    onboarded = prefs.getBool('onboarded') ?? false;
+  }
+
+  Future<void> setLang(String l) async {
     lang = l;
     notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('lang', l);
+  }
+
+  Future<void> finishOnboarding() async {
+    onboarded = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('onboarded', true);
   }
 }
 
@@ -30,18 +57,21 @@ class WaterlogWatchApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const seed = Color(0xFF0277BD);
-    return MaterialApp(
-      title: 'Waterlog Watch',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: seed),
-        useMaterial3: true,
+    return ListenableBuilder(
+      listenable: settings,
+      builder: (context, _) => MaterialApp(
+        title: 'Waterlog Watch',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: seed),
+          useMaterial3: true,
+        ),
+        darkTheme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark),
+          useMaterial3: true,
+        ),
+        home: settings.onboarded ? const MapScreen() : const OnboardingScreen(),
       ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark),
-        useMaterial3: true,
-      ),
-      home: const MapScreen(),
     );
   }
 }

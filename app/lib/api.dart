@@ -60,32 +60,29 @@ class Report {
         car = (j['passable']?['car'] ?? true) as bool,
         hazards = ((j['hazards'] ?? []) as List).map((e) => e.toString()).toList(),
         photoUrl = j['photo_url'] as String?;
-
-  String get depthLabel => switch (depth) {
-        'ankle' => 'Ankle-deep',
-        'knee' => 'Knee-deep',
-        'waist' => 'Waist-deep',
-        'above_waist' => 'Above waist',
-        _ => 'Shallow',
-      };
-
-  String get ageLabel {
-    if (ageMinutes < 1) return 'just now';
-    if (ageMinutes < 60) return '$ageMinutes min ago';
-    return '${ageMinutes ~/ 60} h ago';
-  }
 }
 
 class RouteResult {
-  final String verdict, advice;
-  final int worstSeverity, routeLengthM;
+  final String verdict, advice, source;
+  final int worstSeverity, routeLengthM, blockedSpots;
+  final int? durationS;
   final List<Report> spots;
+
+  /// Road geometry as [lat, lng] pairs (straight line if routing was unavailable).
+  final List<List<double>> path;
+
   RouteResult.fromJson(Map<String, dynamic> j)
       : verdict = j['verdict'] as String,
         advice = j['advice'] as String,
+        source = (j['routing_source'] ?? 'straight-line') as String,
         worstSeverity = j['worst_severity'] as int,
         routeLengthM = j['route_length_m'] as int,
-        spots = ((j['spots'] ?? []) as List).map((e) => Report.fromJson(e as Map<String, dynamic>)).toList();
+        blockedSpots = (j['blocked_spots'] ?? 0) as int,
+        durationS = j['duration_s'] as int?,
+        spots = ((j['spots'] ?? []) as List).map((e) => Report.fromJson(e as Map<String, dynamic>)).toList(),
+        path = ((j['path'] ?? []) as List)
+            .map((p) => [((p as List)[0] as num).toDouble(), (p[1] as num).toDouble()])
+            .toList();
 }
 
 class Api {
@@ -151,9 +148,11 @@ class Api {
     return Report.fromJson(_decode(r) as Map<String, dynamic>);
   }
 
-  static Future<RouteResult> routeCheck(double fLat, double fLng, double tLat, double tLng) async {
+  /// [mode] is 'car', 'scooter' or 'pedestrian'.
+  static Future<RouteResult> routeCheck(double fLat, double fLng, double tLat, double tLng,
+      {String mode = 'car'}) async {
     final r = await http
-        .get(Uri.parse('$apiUrl/route-check?from_lat=$fLat&from_lng=$fLng&to_lat=$tLat&to_lng=$tLng'))
+        .get(Uri.parse('$apiUrl/route-check?from_lat=$fLat&from_lng=$fLng&to_lat=$tLat&to_lng=$tLng&mode=$mode'))
         .timeout(const Duration(seconds: 20));
     return RouteResult.fromJson(_decode(r) as Map<String, dynamic>);
   }

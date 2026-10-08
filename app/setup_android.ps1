@@ -16,7 +16,22 @@ if ($xml -notmatch "ACCESS_FINE_LOCATION") {
   $xml = $xml -replace '(<manifest[^>]*>)', "`$1`r`n$perms"
 }
 $xml = $xml -replace 'android:label="waterlog_watch"', 'android:label="Waterlog Watch"'
-Set-Content -Path $manifest -Value $xml -Encoding UTF8
+# Let url_launcher open the phone dialler (Android 11+ package visibility)
+if ($xml -notmatch 'android:scheme="tel"') {
+  $telQuery = @"
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
+        </intent>
+"@
+  if ($xml -match '<queries>') {
+    $xml = $xml -replace '<queries>', "<queries>`r`n$telQuery"
+  } else {
+    $xml = $xml -replace '</manifest>', "    <queries>`r`n$telQuery    </queries>`r`n</manifest>"
+  }
+}
+[System.IO.File]::WriteAllText((Resolve-Path $manifest), $xml)  # UTF-8 without BOM
 flutter pub get
+dart run flutter_launcher_icons
 Write-Host "`nAndroid project ready. Build with:" -ForegroundColor Green
 Write-Host "  flutter build apk --release --dart-define=API_URL=<ApiUrl from the AWS deploy>"

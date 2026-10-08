@@ -17,6 +17,11 @@ Waterlog Watch turns every phone into a flood sensor:
 4. **Route check**: long-press your destination and see whether your way is safe ("Avoid", "Caution" or "Clear").
 5. **Self-healing**: neighbours tap *Still flooded* or *Cleared*. Cleared spots disappear, and stale reports
    expire automatically through DynamoDB TTL.
+6. **Ward command dashboard**: a live web dashboard (`/dashboard`) ranks hotspots by severity so officers know
+   where to send pumps first.
+7. **Safety first**: one-tap calls to 112 and the Chennai Corporation flood helpline (1913), plus monsoon safety tips.
+
+The full app UI is available in **Tamil, Hindi and English**, with first-launch onboarding.
 
 ## Architecture (100% AWS serverless)
 
@@ -31,6 +36,10 @@ Flutter app ──HTTPS──> Amazon API Gateway (HTTP API, throttled)
                (Nova Lite,      (photos, private,  (reports, geohash GSI
                 Converse API,    presigned URLs,    for nearby queries,
                 multimodal)      7-day lifecycle)   TTL auto-expiry)
+                        ▲
+               Amazon Rekognition (content moderation before anything goes public)
+
+        Observability: CloudWatch Logs (JSON) + error alarm · AWS X-Ray tracing
 ```
 
 All infrastructure is defined in [`template.yaml`](template.yaml) (AWS SAM) and deploys with one command.
@@ -42,6 +51,8 @@ All infrastructure is defined in [`template.yaml`](template.yaml) (AWS SAM) and 
 | **Amazon API Gateway** | HTTPS API with CORS and rate limiting |
 | **Amazon DynamoDB** | Stores reports. A geohash GSI finds nearby spots; TTL removes stale floods |
 | **Amazon S3** | Private photo storage with presigned URLs and auto-deletion after 7 days |
+| **Amazon Rekognition** | Blocks unsafe or explicit images before they are posted publicly |
+| **Amazon CloudWatch + AWS X-Ray** | Structured JSON logs, an error alarm, and end-to-end request tracing |
 | **AWS SAM / CloudFormation** | Infrastructure as code |
 
 ## API
@@ -53,6 +64,7 @@ All infrastructure is defined in [`template.yaml`](template.yaml) (AWS SAM) and 
 | POST | `/reports/{id}/vote` | `still_there` or `cleared` (one vote per device). 3 or more "cleared" votes close the spot |
 | GET | `/route-check?from_lat&from_lng&to_lat&to_lng` | Flooded spots near your route, with a verdict |
 | GET | `/stats?lat&lng` | Counts for a neighbourhood |
+| GET | `/dashboard?lat&lng&radius_km` | Live ward command dashboard (HTML) |
 
 Interactive docs: `<ApiUrl>/docs`
 
@@ -72,10 +84,20 @@ powershell -ExecutionPolicy Bypass -File .\setup_android.ps1    # first time onl
 flutter build apk --release --dart-define=API_URL=<ApiUrl>
 ```
 
+### Demo data (for recording when it isn't raining)
+```bash
+python scripts/seed_demo.py          # 12 labelled [Demo] spots around Chennai, expire in 6 h
+python scripts/seed_demo.py --clear  # remove them
+```
+
 ### Backend tests (AWS mocked with moto)
 ```bash
 cd backend && pip install -r requirements-dev.txt && pytest -q
 ```
+
+## Docs
+- [Demo video script](docs/DEMO_SCRIPT.md)
+- [Submission write-up](docs/WRITEUP.md)
 
 ## What's next
 - SMS/WhatsApp alerts for subscribed streets (Amazon SNS / Pinpoint)

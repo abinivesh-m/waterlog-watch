@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waterlog Watch · Command Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --bg:#0b1220; --card:#121b2e; --line:#22304a; --text:#e6edf7; --muted:#8fa3bf;
+          --s1:#43A047; --s2:#FDD835; --s3:#FB8C00; --s4:#E53935; --s5:#B71C1C; --accent:#29b6f6; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:12px; padding:14px 20px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  header .sub { color:var(--muted); }
+  header .live { margin-left:auto; color:var(--muted); font-size:12px; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#22c55e; margin-right:6px; animation:p 2s infinite; }
+  @keyframes p { 50% { opacity:.3 } }
+  .kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; padding:16px 20px 0; }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .kpi b { display:block; font-size:28px; font-variant-numeric:tabular-nums; }
+  .kpi span { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  main { display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); gap:16px; padding:16px 20px 20px; }
+  #map { height:calc(100vh - 230px); min-height:420px; border-radius:12px; border:1px solid var(--line); }
+  .list { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:auto; height:calc(100vh - 230px); min-height:420px; }
+  .row { display:grid; grid-template-columns:44px 1fr auto; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .row:hover { background:#17223a; }
+  .sev { width:36px; height:36px; border-radius:50%; display:grid; place-items:center; font-weight:700; color:#fff; border:2px solid #fff3; }
+  .row .t { font-weight:600; }
+  .row .m { color:var(--muted); font-size:12px; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:20px; border:1px solid var(--line); color:var(--muted); white-space:nowrap; }
+  .pill.no { color:#fca5a5; border-color:#7f1d1d; }
+  .empty { padding:40px; text-align:center; color:var(--muted); }
+  .legend { display:flex; gap:10px; padding:0 20px; color:var(--muted); font-size:12px; flex-wrap:wrap; }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:-1px; }
+  @media (max-width: 900px) { .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } main { grid-template-columns:1fr; } #map, .list { height:420px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌧️ Waterlog Watch</h1><span class="sub">Ward command dashboard · AI-verified citizen flood reports</span>
+  <span class="live"><span class="dot"></span><span id="updated">Loading…</span></span>
+</header>
+<section class="kpis">
+  <div class="kpi"><b id="k-active">–</b><span>Active flooded spots</span></div>
+  <div class="kpi"><b id="k-danger">–</b><span>Dangerous (severity 4–5)</span></div>
+  <div class="kpi"><b id="k-car">–</b><span>Impassable for cars</span></div>
+  <div class="kpi"><b id="k-conf">–</b><span>Citizen confirmations</span></div>
+</section>
+<main>
+  <div>
+    <div id="map"></div>
+  </div>
+  <div class="list" id="list"><div class="empty">Loading reports…</div></div>
+</main>
+<div class="legend" style="padding-bottom:16px">
+  Severity: <span><i style="background:var(--s1)"></i>1 puddles</span><span><i style="background:var(--s2)"></i>2</span>
+  <span><i style="background:var(--s3)"></i>3 bikes struggle</span><span><i style="background:var(--s4)"></i>4</span>
+  <span><i style="background:var(--s5)"></i>5 impassable</span> · Ranked by severity, then confirmations · refreshes every 30 s
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const qs = new URLSearchParams(location.search);
+const LAT = parseFloat(qs.get('lat') || '13.0418'), LNG = parseFloat(qs.get('lng') || '80.2341');
+const RADIUS = parseFloat(qs.get('radius_km') || '15');
+const SEV = ['', '#43A047', '#FDD835', '#FB8C00', '#E53935', '#B71C1C'];
+const DEPTH = { ankle: 'Ankle-deep', knee: 'Knee-deep', waist: 'Waist-deep', above_waist: 'Above waist' };
+const map = L.map('map', { zoomControl: true }).setView([LAT, LNG], 12);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(map);
+const layer = L.layerGroup().addTo(map);
+const markers = {};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const age = m => m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ago`;
+
+async function load() {
+  try {
+    const r = await fetch(`reports/nearby?lat=${LAT}&lng=${LNG}&radius_km=${RADIUS}`);
+    const data = await r.json();
+    const reps = (data.reports || []).sort((a, b) => b.severity - a.severity || b.still_there - a.still_there);
+    document.getElementById('k-active').textContent = reps.length;
+    document.getElementById('k-danger').textContent = reps.filter(x => x.severity >= 4).length;
+    document.getElementById('k-car').textContent = reps.filter(x => !x.passable?.car).length;
+    document.getElementById('k-conf').textContent = reps.reduce((s, x) => s + (x.still_there || 0), 0);
+    layer.clearLayers();
+    reps.forEach(x => {
+      L.circle([x.lat, x.lng], { radius: 120 + x.severity * 80, color: SEV[x.severity], fillColor: SEV[x.severity], fillOpacity: .25, weight: 0 }).addTo(layer);
+      const m = L.circleMarker([x.lat, x.lng], { radius: 9, color: '#fff', weight: 2, fillColor: SEV[x.severity], fillOpacity: 1 })
+        .bindPopup(`<b>Severity ${x.severity}/5 · ${esc(DEPTH[x.depth] || 'Shallow')}</b><br>${esc(x.summary)}`
+          + (x.photo_url ? `<br><img src="${esc(x.photo_url)}" style="width:220px;border-radius:6px;margin-top:6px">` : '')
+          + (x.note ? `<br><i>${esc(x.note)}</i>` : ''))
+        .addTo(layer);
+      markers[x.id] = m;
+    });
+    const list = document.getElementById('list');
+    list.innerHTML = reps.length ? reps.map(x => `
+      <div class="row" data-id="${esc(x.id)}">
+        <div class="sev" style="background:${SEV[x.severity]}">${x.severity}</div>
+        <div><div class="t">${esc(DEPTH[x.depth] || 'Shallow')} · ~${x.depth_cm_estimate} cm${x.note ? ' · ' + esc(x.note) : ''}</div>
+          <div class="m">${esc(x.summary)}</div>
+          <div class="m">${age(x.age_minutes)} · ${x.still_there} confirmed · ${(x.distance_m / 1000).toFixed(1)} km from centre
+            ${(x.hazards || []).map(h => ` · ⚠️ ${esc(h)}`).join('')}</div></div>
+        <div>${x.passable?.car ? '' : '<span class="pill no">No cars</span>'}</div>
+      </div>`).join('') : '<div class="empty">No active waterlogging reported in this area. 🎉</div>';
+    list.querySelectorAll('.row').forEach(el => el.onclick = () => {
+      const m = markers[el.dataset.id]; if (m) { map.setView(m.getLatLng(), 15); m.openPopup(); }
+    });
+    document.getElementById('updated').textContent = 'Live · updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('updated').textContent = 'Connection problem, retrying…';
+  }
+}
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>

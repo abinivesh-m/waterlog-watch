@@ -30,6 +30,11 @@ class AssessmentError(Exception):
 
 
 _client = None
+_rekognition = None
+
+# Rekognition top-level moderation categories that block a public report.
+BLOCKED_CATEGORIES = {"Explicit", "Explicit Nudity", "Non-Explicit Nudity of Intimate parts and Kissing",
+                      "Violence", "Visually Disturbing", "Hate Symbols"}
 
 
 def _bedrock():
@@ -37,6 +42,29 @@ def _bedrock():
     if _client is None:
         _client = boto3.client("bedrock-runtime", region_name=config.BEDROCK_REGION)
     return _client
+
+
+def moderate(image: bytes) -> list[str]:
+    """Amazon Rekognition content moderation. Returns blocking labels (empty list = OK).
+
+    Fails open: if Rekognition is unavailable the report still goes through Bedrock,
+    which rejects anything that isn't a flooded street anyway.
+    """
+    global _rekognition
+    if image_format(image) not in ("jpeg", "png"):  # Rekognition doesn't take WebP
+        return []
+    try:
+        if _rekognition is None:
+            _rekognition = boto3.client("rekognition", region_name=config.AWS_REGION)
+        labels = _rekognition.detect_moderation_labels(Image={"Bytes": image}, MinConfidence=80)
+    except Exception:  # noqa: BLE001
+        return []
+    found = set()
+    for label in labels.get("ModerationLabels", []):
+        top = label.get("ParentName") or label.get("Name", "")
+        if top in BLOCKED_CATEGORIES or label.get("Name") in BLOCKED_CATEGORIES:
+            found.add(top or label.get("Name"))
+    return sorted(found)
 
 
 def image_format(data: bytes) -> str:

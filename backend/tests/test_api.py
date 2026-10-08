@@ -44,6 +44,7 @@ def client(monkeypatch):
         storage.reset_clients()
         monkeypatch.setattr(main.config, "REPORTS_TABLE", "t-reports")
         monkeypatch.setattr(main.config, "PHOTOS_BUCKET", "t-photos")
+        monkeypatch.setattr(ai, "moderate", lambda img: [])
         monkeypatch.setattr(ai, "assess_photo", lambda img, note="", lang="ta": ai.normalise(dict(KNEE)))
         yield TestClient(main.app)
         storage.reset_clients()
@@ -118,3 +119,20 @@ def test_geo():
     assert geo.geohash(13.0418, 80.2341, 5) == geo.geohash(13.0420, 80.2343, 5)
     assert 3500 < geo.haversine_m(*TNAGAR, *GUINDY) < 4500
     assert geo.geohash(*TNAGAR, 5) in geo.cells_covering(*TNAGAR, 3000)
+
+
+def test_moderation_blocks(client, monkeypatch):
+    monkeypatch.setattr(ai, "moderate", lambda img: ["Violence"])
+    r = post(client, TNAGAR)
+    assert r.status_code == 422 and "can't be posted" in r.json()["detail"]
+
+
+def test_unsupported_image(client):
+    gif = base64.b64encode(b"GIF89a" + b"0" * 50).decode()
+    r = client.post("/reports", json={"image_base64": gif, "lat": 13, "lng": 80, "device_id": "dev-1"})
+    assert r.status_code == 400 and "Unsupported" in r.json()["detail"]
+
+
+def test_dashboard_served(client):
+    r = client.get("/dashboard")
+    assert r.status_code == 200 and "Ward command dashboard" in r.text and "reports/nearby" in r.text

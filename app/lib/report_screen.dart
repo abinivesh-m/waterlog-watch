@@ -1,9 +1,11 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'api.dart';
+import 'l10n.dart';
 import 'main.dart';
 import 'report_sheet.dart';
 
@@ -54,6 +56,7 @@ class _ReportScreenState extends State<ReportScreen> {
         note: _note.text.trim(),
         lang: settings.lang,
       );
+      HapticFeedback.mediumImpact();
       setState(() {
         _result = report;
         _merged = merged;
@@ -75,17 +78,16 @@ class _ReportScreenState extends State<ReportScreen> {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Report flooding')),
+      appBar: AppBar(title: Text(tr('report'))),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           if (_image == null) ...[
             Icon(Icons.water_drop_outlined, size: 72, color: Theme.of(context).colorScheme.primary),
             const SizedBox(height: 12),
-            Text('Take a clear photo of the waterlogged street.', style: t.titleMedium, textAlign: TextAlign.center),
+            Text(tr('takePhoto'), style: t.titleMedium, textAlign: TextAlign.center),
             const SizedBox(height: 4),
-            Text('Include a kerb, tyre or person so the AI can judge the depth.',
-                style: t.bodyMedium, textAlign: TextAlign.center),
+            Text(tr('photoTip'), style: t.bodyMedium, textAlign: TextAlign.center),
           ] else
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
@@ -98,7 +100,7 @@ class _ReportScreenState extends State<ReportScreen> {
                 child: FilledButton.tonalIcon(
                   onPressed: _sending ? null : () => _pick(ImageSource.camera),
                   icon: const Icon(Icons.photo_camera),
-                  label: const Text('Camera'),
+                  label: Text(tr('camera')),
                 ),
               ),
               const SizedBox(width: 12),
@@ -106,7 +108,7 @@ class _ReportScreenState extends State<ReportScreen> {
                 child: FilledButton.tonalIcon(
                   onPressed: _sending ? null : () => _pick(ImageSource.gallery),
                   icon: const Icon(Icons.photo_library),
-                  label: const Text('Gallery'),
+                  label: Text(tr('gallery')),
                 ),
               ),
             ]),
@@ -114,14 +116,14 @@ class _ReportScreenState extends State<ReportScreen> {
             TextField(
               controller: _note,
               maxLength: 200,
-              decoration: const InputDecoration(
-                labelText: 'Landmark or note (optional)',
-                hintText: 'e.g. Near Usman Road bus stop',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: tr('note'),
+                hintText: tr('noteHint'),
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 8),
-            Text('Location: ${widget.lat.toStringAsFixed(5)}, ${widget.lng.toStringAsFixed(5)}', style: t.bodySmall),
+            Text('${tr('location')}: ${widget.lat.toStringAsFixed(5)}, ${widget.lng.toStringAsFixed(5)}', style: t.bodySmall),
             const SizedBox(height: 16),
             if (_error != null)
               Card(
@@ -134,7 +136,7 @@ class _ReportScreenState extends State<ReportScreen> {
               icon: _sending
                   ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.auto_awesome),
-              label: Text(_sending ? 'AI is checking the photo…' : 'Analyse & report'),
+              label: Text(_sending ? tr('analysing') : tr('analyse')),
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
             ),
           ] else ...[
@@ -147,7 +149,7 @@ class _ReportScreenState extends State<ReportScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        _merged ? 'Already reported here. We counted your confirmation.' : 'Reported! Others nearby can now see it.',
+                        _merged ? tr('merged') : tr('reportedOk'),
                         style: t.titleMedium,
                       ),
                     ),
@@ -161,7 +163,7 @@ class _ReportScreenState extends State<ReportScreen> {
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-              child: const Text('Back to map'),
+              child: Text(tr('back')),
             ),
           ],
         ],

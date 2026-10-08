@@ -6,9 +6,12 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'api.dart';
+import 'l10n.dart';
+import 'list_screen.dart';
 import 'main.dart';
 import 'report_screen.dart';
 import 'report_sheet.dart';
+import 'safety_screen.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -30,6 +33,7 @@ class _MapScreenState extends State<MapScreen> {
   LatLng? _destination;
   RouteResult? _route;
   bool _checkingRoute = false;
+  String _mode = 'scooter'; // most commuters at risk in floods are on two-wheelers
 
   @override
   void initState() {
@@ -49,6 +53,14 @@ class _MapScreenState extends State<MapScreen> {
     await _load();
   }
 
+  void _safeMove(LatLng p, double zoom) {
+    try {
+      _map.move(p, zoom);
+    } catch (_) {
+      // Map not laid out yet; initialCenter covers this case.
+    }
+  }
+
   Future<void> _locate() async {
     try {
       if (!await Geolocator.isLocationServiceEnabled()) return;
@@ -58,6 +70,7 @@ class _MapScreenState extends State<MapScreen> {
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 15)),
       );
+      if (!mounted) return;
       setState(() {
         _me = LatLng(pos.latitude, pos.longitude);
         _haveGps = true;
@@ -65,14 +78,6 @@ class _MapScreenState extends State<MapScreen> {
       _safeMove(_me, 14);
     } catch (_) {
       // Keep the default centre; the app still works for browsing.
-    }
-  }
-
-  void _safeMove(LatLng p, double zoom) {
-    try {
-      _map.move(p, zoom);
-    } catch (_) {
-      // Map not laid out yet; initialCenter covers this case.
     }
   }
 
@@ -100,7 +105,7 @@ class _MapScreenState extends State<MapScreen> {
       _checkingRoute = true;
     });
     try {
-      final res = await Api.routeCheck(_me.latitude, _me.longitude, dest.latitude, dest.longitude);
+      final res = await Api.routeCheck(_me.latitude, _me.longitude, dest.latitude, dest.longitude, mode: _mode);
       if (!mounted) return;
       setState(() => _route = res);
     } catch (e) {
@@ -112,30 +117,20 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  void _openReport(Report r) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: false,
-      builder: (_) => ReportSheet(
-        report: r,
-        onUpdated: (u) => setState(() {
-          _reports = [for (final x in _reports) if (x.id == u.id) u else x]
-              .where((x) => x.status == 'active')
-              .toList();
-        }),
-      ),
-    );
+  void _replace(Report u) {
+    setState(() {
+      _reports = [for (final x in _reports) if (x.id == u.id) u else x].where((x) => x.status == 'active').toList();
+    });
   }
+
+  void _openReport(Report r) => showReportSheet(context, r, _replace);
 
   Future<void> _newReport() async {
     if (!_haveGps) {
       await _locate();
       if (!_haveGps) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Turn on location so your report lands in the right place.'),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('locationNeeded'))));
         return;
       }
     }
@@ -146,6 +141,18 @@ class _MapScreenState extends State<MapScreen> {
     );
     if (added == true) _load();
   }
+
+  /// Soft glow under each pin, larger and stronger for worse flooding.
+  List<CircleMarker> get _glow => [
+        for (final r in _reports)
+          CircleMarker(
+            point: LatLng(r.lat, r.lng),
+            radius: 80.0 + r.severity * 70,
+            useRadiusInMeter: true,
+            color: severityColor(r.severity).withValues(alpha: 0.22),
+            borderStrokeWidth: 0,
+          ),
+      ];
 
   List<Marker> get _markers => [
         for (final r in _reports)
@@ -164,10 +171,7 @@ class _MapScreenState extends State<MapScreen> {
                 ),
                 child: Center(
                   child: Text('${r.severity}',
-                      style: TextStyle(
-                          color: r.severity == 2 ? Colors.black : Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16)),
+                      style: TextStyle(color: onSeverity(r.severity), fontWeight: FontWeight.bold, fontSize: 16)),
                 ),
               ),
             ),
@@ -181,6 +185,7 @@ class _MapScreenState extends State<MapScreen> {
               color: Colors.blue,
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 3),
+              boxShadow: const [BoxShadow(blurRadius: 6, color: Colors.black26)],
             ),
           ),
         ),
@@ -194,26 +199,37 @@ class _MapScreenState extends State<MapScreen> {
           ),
       ];
 
+  String _statusText() {
+    if (_reports.isEmpty) return tr('none');
+    final severe = _reports.where((r) => r.severity >= 4).length;
+    final base = _reports.length == 1 ? tr('nearby1') : tr('nearby', {'n': _reports.length});
+    return severe > 0 ? '$base · ${tr('dangerous', {'n': severe})}' : base;
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final severe = _reports.where((r) => r.severity >= 4).length;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Waterlog Watch'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.health_and_safety_outlined),
+            tooltip: tr('safety'),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SafetyScreen())),
+          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.translate),
-            tooltip: 'AI summary language',
+            tooltip: tr('language'),
             initialValue: settings.lang,
             onSelected: (l) => setState(() => settings.setLang(l)),
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'ta', child: Text('தமிழ் + English')),
-              PopupMenuItem(value: 'hi', child: Text('हिन्दी + English')),
-              PopupMenuItem(value: 'en', child: Text('English only')),
+              PopupMenuItem(value: 'ta', child: Text('தமிழ்')),
+              PopupMenuItem(value: 'hi', child: Text('हिन्दी')),
+              PopupMenuItem(value: 'en', child: Text('English')),
             ],
           ),
-          IconButton(icon: const Icon(Icons.refresh), tooltip: 'Refresh', onPressed: _load),
+          IconButton(icon: const Icon(Icons.refresh), tooltip: tr('refresh'), onPressed: _load),
         ],
       ),
       body: Stack(children: [
@@ -227,14 +243,19 @@ class _MapScreenState extends State<MapScreen> {
           children: [
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.waterlogwatch.app',
+              userAgentPackageName: 'com.waterlogwatch.waterlog_watch',
             ),
+            CircleLayer(circles: _glow),
             if (_destination != null)
               PolylineLayer(polylines: [
                 Polyline(
-                  points: [_me, _destination!],
-                  strokeWidth: 5,
-                  color: _route == null ? Colors.grey : severityColor(_route!.worstSeverity == 0 ? 1 : _route!.worstSeverity),
+                  points: _route != null && _route!.path.length >= 2
+                      ? [for (final p in _route!.path) LatLng(p[0], p[1])]
+                      : [_me, _destination!],
+                  strokeWidth: 6,
+                  color: _route == null
+                      ? Colors.grey
+                      : severityColor(_route!.worstSeverity == 0 ? 1 : _route!.worstSeverity),
                 ),
               ]),
             MarkerLayer(markers: _markers),
@@ -246,51 +267,56 @@ class _MapScreenState extends State<MapScreen> {
           left: 12,
           right: 12,
           child: Card(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: _loading
-                  ? const Row(children: [
-                      SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-                      SizedBox(width: 12),
-                      Text('Loading flood reports…'),
-                    ])
-                  : _error != null
-                      ? Row(children: [
-                          Icon(Icons.cloud_off, color: scheme.error),
-                          const SizedBox(width: 12),
-                          Expanded(child: Text(_error!)),
-                        ])
-                      : Row(children: [
-                          Icon(Icons.water, color: scheme.primary),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              _reports.isEmpty
-                                  ? 'No waterlogging reported within 10 km.'
-                                  : '${_reports.length} flooded spot${_reports.length == 1 ? '' : 's'} nearby'
-                                      '${severe > 0 ? ' · $severe dangerous' : ''}',
-                            ),
-                          ),
-                        ]),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: _reports.isEmpty
+                  ? null
+                  : () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ListScreen(lat: _me.latitude, lng: _me.longitude, initial: _reports),
+                        ),
+                      ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: _loading
+                    ? Row(children: [
+                        const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                        const SizedBox(width: 12),
+                        Text(tr('loading')),
+                      ])
+                    : _error != null
+                        ? Row(children: [
+                            Icon(Icons.cloud_off, color: scheme.error),
+                            const SizedBox(width: 12),
+                            Expanded(child: Text(_error!)),
+                          ])
+                        : Row(children: [
+                            Icon(Icons.water, color: scheme.primary),
+                            const SizedBox(width: 12),
+                            Expanded(child: Text(_statusText())),
+                            if (_reports.isNotEmpty) ...[
+                              Text(tr('list'), style: TextStyle(color: scheme.primary)),
+                              Icon(Icons.chevron_right, color: scheme.primary),
+                            ],
+                          ]),
+              ),
             ),
           ),
         ),
-        if (_destination != null)
-          Positioned(left: 12, right: 12, bottom: 96, child: _routeCard()),
+        if (_destination != null) Positioned(left: 12, right: 12, bottom: 96, child: _routeCard()),
         if (_destination == null && !_loading)
-          const Positioned(
-            left: 0,
-            right: 0,
+          Positioned(
+            left: 16,
+            right: 16,
             bottom: 100,
-            child: Center(
-              child: Chip(label: Text('Long-press anywhere to check your route')),
-            ),
+            child: Center(child: Chip(avatar: const Icon(Icons.touch_app, size: 18), label: Text(tr('hint')))),
           ),
       ]),
       floatingActionButton: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
         FloatingActionButton.small(
           heroTag: 'me',
-          tooltip: 'My location',
+          tooltip: tr('myLocation'),
           onPressed: () async {
             await _locate();
             _safeMove(_me, 15);
@@ -303,7 +329,7 @@ class _MapScreenState extends State<MapScreen> {
           heroTag: 'report',
           onPressed: _newReport,
           icon: const Icon(Icons.add_a_photo),
-          label: const Text('Report flooding'),
+          label: Text(tr('report')),
         ),
       ]),
     );
@@ -312,12 +338,10 @@ class _MapScreenState extends State<MapScreen> {
   Widget _routeCard() {
     final r = _route;
     final color = r == null ? Colors.grey : severityColor(r.worstSeverity == 0 ? 1 : r.worstSeverity);
-    final title = switch (r?.verdict) {
-      'avoid' => 'Avoid this route',
-      'caution' => 'Caution on this route',
-      'minor' => 'Minor water on route',
-      'clear' => 'Route looks clear',
-      _ => 'Checking route…',
+    final verdict = r?.verdict;
+    final title = switch (verdict) {
+      'avoid' || 'caution' || 'minor' || 'clear' => tr(verdict!),
+      _ => tr('checking'),
     };
     return Card(
       shape: RoundedRectangleBorder(side: BorderSide(color: color, width: 2), borderRadius: BorderRadius.circular(12)),
@@ -325,7 +349,7 @@ class _MapScreenState extends State<MapScreen> {
         padding: const EdgeInsets.fromLTRB(16, 8, 4, 12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           Row(children: [
-            Icon(r?.verdict == 'clear' ? Icons.check_circle : Icons.alt_route, color: color),
+            Icon(verdict == 'clear' ? Icons.check_circle : Icons.alt_route, color: color),
             const SizedBox(width: 8),
             Expanded(child: Text(title, style: Theme.of(context).textTheme.titleMedium)),
             IconButton(
@@ -336,18 +360,43 @@ class _MapScreenState extends State<MapScreen> {
               }),
             ),
           ]),
+          Padding(
+            padding: const EdgeInsets.only(right: 12, bottom: 8),
+            child: SegmentedButton<String>(
+              showSelectedIcon: false,
+              segments: [
+                ButtonSegment(value: 'scooter', icon: const Icon(Icons.two_wheeler), label: Text(tr('bike'))),
+                ButtonSegment(value: 'car', icon: const Icon(Icons.directions_car), label: Text(tr('car'))),
+                ButtonSegment(value: 'pedestrian', icon: const Icon(Icons.directions_walk), label: Text(tr('walk'))),
+              ],
+              selected: {_mode},
+              onSelectionChanged: (s) {
+                setState(() => _mode = s.first);
+                if (_destination != null) _checkRoute(_destination!);
+              },
+            ),
+          ),
           if (_checkingRoute) const LinearProgressIndicator(),
           if (r != null) ...[
-            Text(r.advice),
+            Text(tr('${r.verdict}Adv')),
             const SizedBox(height: 4),
-            Text('${(r.routeLengthM / 1000).toStringAsFixed(1)} km straight-line · ${r.spots.length} reported spot(s) on the way',
-                style: Theme.of(context).textTheme.bodySmall),
+            Text(
+              [
+                tr('onRoute', {'km': km(r.routeLengthM), 'n': r.spots.length}),
+                if (r.durationS != null) tr('mins', {'n': (r.durationS! / 60).ceil()}),
+              ].join(' · '),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
             for (final s in r.spots.take(3))
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                leading: CircleAvatar(radius: 12, backgroundColor: severityColor(s.severity), child: Text('${s.severity}', style: const TextStyle(fontSize: 12))),
-                title: Text('${s.depthLabel} · ${((s.distanceM ?? 0) / 1000).toStringAsFixed(1)} km ahead'),
+                leading: CircleAvatar(
+                  radius: 12,
+                  backgroundColor: severityColor(s.severity),
+                  child: Text('${s.severity}', style: TextStyle(fontSize: 12, color: onSeverity(s.severity))),
+                ),
+                title: Text('${depthText(s.depth)} · ${tr('ahead', {'km': km(s.distanceM)})}'),
                 subtitle: s.note.isNotEmpty ? Text(s.note, maxLines: 1, overflow: TextOverflow.ellipsis) : null,
                 onTap: () => _openReport(s),
               ),
