@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Waterlog Watch - crowd-sourced, AI-verified street flooding alerts (API Gateway + Lambda + Bedrock + S3 + DynamoDB)
+
+Parameters:
+  BedrockModelId:
+    Type: String
+    Default: apac.amazon.nova-lite-v1:0
+    Description: Bedrock model or inference profile used to assess photos
+  ReportTtlHours:
+    Type: Number
+    Default: 12
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [x86_64]
+    MemorySize: 1024
+    Timeout: 29
+
+Resources:
+  PhotosBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-photos
+            Status: Enabled
+            ExpirationInDays: 7
+
+  ReportsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: id, AttributeType: S}
+        - {AttributeName: gh5, AttributeType: S}
+        - {AttributeName: created_at, AttributeType: N}
+      KeySchema:
+        - {AttributeName: id, KeyType: HASH}
+      GlobalSecondaryIndexes:
+        - IndexName: gh5-index
+          KeySchema:
+            - {AttributeName: gh5, KeyType: HASH}
+            - {AttributeName: created_at, KeyType: RANGE}
+          Projection: {ProjectionType: ALL}
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/
+      Handler: handler.handler
+      Environment:
+        Variables:
+          REPORTS_TABLE: !Ref ReportsTable
+          PHOTOS_BUCKET: !Ref PhotosBucket
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          REPORT_TTL_HOURS: !Ref ReportTtlHours
+      Policies:
+        - DynamoDBCrudPolicy: {TableName: !Ref ReportsTable}
+        - S3CrudPolicy: {BucketName: !Ref PhotosBucket}
+        - Statement:
+            - Effect: Allow
+              Action: [bedrock:InvokeModel, bedrock:Converse]
+              Resource:
+                - arn:aws:bedrock:*::foundation-model/*
+                - !Sub arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowHeaders: ["*"]
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 50
+        ThrottlingRateLimit: 20
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for the Flutter app
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  PhotosBucketName:
+    Value: !Ref PhotosBucket
+  ReportsTableName:
+    Value: !Ref ReportsTable

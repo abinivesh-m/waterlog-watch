@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+# SAM
+.aws-sam/
+samconfig.toml
+# Flutter
+app/.dart_tool/
+app/build/
+app/.flutter-plugins*
+app/android/key.properties
+*.jks
+*.keystore
+app/android/local.properties
+app/android/.gradle/
+.idea/
+*.iml
+.env

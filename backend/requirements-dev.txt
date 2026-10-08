@@ -1,0 +1,6 @@
+-r requirements.txt
+boto3
+moto[dynamodb,s3]>=5
+pytest
+httpx
+uvicorn
