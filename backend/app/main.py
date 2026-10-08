@@ -42,7 +42,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 PUBLIC_FIELDS = ("id", "lat", "lng", "created_at", "updated_at", "status", "note", "is_waterlogging",
                  "depth", "depth_cm_estimate", "severity", "passable", "hazards", "summary",
-                 "summary_local", "still_there", "cleared")
+                 "summary_local", "still_there", "cleared", "ai_provider")
 
 
 def public(report: dict, origin: tuple[float, float] | None = None) -> dict:

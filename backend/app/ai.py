@@ -1,6 +1,15 @@
-"""Photo assessment with Amazon Bedrock (Converse API, multimodal)."""
+"""Photo assessment with Amazon Bedrock (Converse API, multimodal).
+
+If Bedrock is unavailable (for example while a new AWS account is still being verified)
+and GEMINI_API_KEY is set, the same prompt is sent to Google Gemini instead, so the app
+keeps working. Every assessment records which provider produced it.
+"""
+import base64
 import json
+import logging
 import re
+import urllib.error
+import urllib.request
 
 import boto3
 
@@ -28,6 +37,8 @@ User's note (may be empty): {note}"""
 class AssessmentError(Exception):
     pass
 
+
+log = logging.getLogger("waterlog")
 
 _client = None
 _rekognition = None
@@ -115,21 +126,58 @@ def normalise(result: dict) -> dict:
     }
 
 
+def _assess_bedrock(image: bytes, fmt: str, prompt: str) -> dict:
+    resp = _bedrock().converse(
+        modelId=config.BEDROCK_MODEL_ID,
+        messages=[{"role": "user", "content": [
+            {"image": {"format": fmt, "source": {"bytes": image}}},
+            {"text": prompt},
+        ]}],
+        inferenceConfig={"maxTokens": 600, "temperature": 0.1},
+    )
+    text = "".join(c.get("text", "") for c in resp["output"]["message"]["content"])
+    return normalise(_extract_json(text))
+
+
+def _assess_gemini(image: bytes, fmt: str, prompt: str) -> dict:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent"
+    body = {
+        "contents": [{"parts": [
+            {"inline_data": {"mime_type": f"image/{fmt}", "data": base64.b64encode(image).decode()}},
+            {"text": prompt},
+        ]}],
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 600, "responseMimeType": "application/json"},
+    }
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={
+        "Content-Type": "application/json", "x-goog-api-key": config.GEMINI_API_KEY})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        data = json.loads(r.read())
+    text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+    return normalise(_extract_json(text))
+
+
 def assess_photo(image: bytes, note: str = "", lang: str = "ta") -> dict:
     fmt = image_format(image)
     prompt = PROMPT.format(lang_name=LANG_NAMES.get(lang, "Tamil"), note=note[:300] or "(none)")
     try:
-        resp = _bedrock().converse(
-            modelId=config.BEDROCK_MODEL_ID,
-            messages=[{"role": "user", "content": [
-                {"image": {"format": fmt, "source": {"bytes": image}}},
-                {"text": prompt},
-            ]}],
-            inferenceConfig={"maxTokens": 600, "temperature": 0.1},
-        )
-        text = "".join(c.get("text", "") for c in resp["output"]["message"]["content"])
-        return normalise(_extract_json(text))
+        result = _assess_bedrock(image, fmt, prompt)
+        result["ai_provider"] = "amazon-bedrock"
+        return result
     except AssessmentError:
         raise
-    except Exception as e:  # noqa: BLE001 -- surface a clean error to the API layer
-        raise AssessmentError(f"Bedrock call failed: {e.__class__.__name__}") from e
+    except Exception as e:  # noqa: BLE001
+        bedrock_error = e.__class__.__name__
+        log.warning("bedrock_unavailable", extra={"error": bedrock_error, "detail": str(e)[:200]})
+
+    if not config.GEMINI_API_KEY:
+        raise AssessmentError(f"Bedrock call failed: {bedrock_error}")
+    try:
+        result = _assess_gemini(image, fmt, prompt)
+        result["ai_provider"] = "gemini-fallback"
+        return result
+    except AssessmentError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        detail = e.read()[:200].decode(errors="ignore") if isinstance(e, urllib.error.HTTPError) else ""
+        log.warning("gemini_failed", extra={"error": e.__class__.__name__, "detail": detail})
+        raise AssessmentError(f"AI assessment failed (Bedrock: {bedrock_error}, Gemini: {e.__class__.__name__})") from e

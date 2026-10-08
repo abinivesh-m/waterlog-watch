@@ -164,3 +164,47 @@ def test_unsupported_image(client):
 def test_dashboard_served(client):
     r = client.get("/dashboard")
     assert r.status_code == 200 and "Ward command dashboard" in r.text and "reports/nearby" in r.text
+
+
+def test_ai_falls_back_to_gemini_when_bedrock_blocked(monkeypatch):
+    from app import config
+
+    def denied(*a, **k):
+        raise RuntimeError("AccessDeniedException")
+
+    monkeypatch.setattr(ai, "_assess_bedrock", denied)
+    monkeypatch.setattr(ai, "_assess_gemini", lambda *a, **k: ai.normalise(dict(KNEE)))
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "")
+    with pytest.raises(ai.AssessmentError):
+        ai.assess_photo(JPEG)
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "k")
+    out = ai.assess_photo(JPEG)
+    assert out["ai_provider"] == "gemini-fallback" and out["severity"] == 4
+
+
+def test_ai_prefers_bedrock(monkeypatch):
+    monkeypatch.setattr(ai, "_assess_bedrock", lambda *a, **k: ai.normalise(dict(KNEE)))
+    monkeypatch.setattr(ai, "_assess_gemini", lambda *a, **k: (_ for _ in ()).throw(AssertionError("not called")))
+    assert ai.assess_photo(JPEG)["ai_provider"] == "amazon-bedrock"
+
+
+def test_gemini_request_shape(monkeypatch):
+    from app import config
+    captured = {}
+
+    class Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self):
+            import json
+            return json.dumps({"candidates": [{"content": {"parts": [{"text": '{"is_waterlogging": true, "depth": "knee", "severity": 4}'}]}}]}).encode()
+
+    def fake_urlopen(req, timeout):
+        captured["url"], captured["key"], captured["body"] = req.full_url, req.get_header("X-goog-api-key"), req.data
+        return Resp()
+
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "secret")
+    monkeypatch.setattr(ai.urllib.request, "urlopen", fake_urlopen)
+    out = ai._assess_gemini(JPEG, "jpeg", "prompt")
+    assert out["depth"] == "knee" and captured["key"] == "secret" and b"inline_data" in captured["body"]
+    assert config.GEMINI_MODEL in captured["url"]

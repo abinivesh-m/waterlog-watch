@@ -6,6 +6,9 @@ PHOTOS_BUCKET = os.environ.get("PHOTOS_BUCKET", "waterlog-photos")
 # Amazon Nova Lite: multimodal, cheap, served from Mumbai via the APAC inference profile.
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "apac.amazon.nova-lite-v1:0")
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION", AWS_REGION)
+# Fallback vision model, used only if Bedrock is unavailable (e.g. account still being verified).
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 REPORT_TTL_HOURS = int(os.environ.get("REPORT_TTL_HOURS", "12"))
 CLEARED_VOTES_TO_CLOSE = int(os.environ.get("CLEARED_VOTES_TO_CLOSE", "3"))

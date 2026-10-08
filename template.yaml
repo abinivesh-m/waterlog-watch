@@ -10,6 +10,14 @@ Parameters:
   ReportTtlHours:
     Type: Number
     Default: 12
+  GeminiApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Optional fallback vision model key, used only if Amazon Bedrock is unavailable
+  GeminiModel:
+    Type: String
+    Default: gemini-3.1-flash-lite
 
 Globals:
   Function:
@@ -68,6 +76,8 @@ Resources:
           PHOTOS_BUCKET: !Ref PhotosBucket
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           REPORT_TTL_HOURS: !Ref ReportTtlHours
+          GEMINI_API_KEY: !Ref GeminiApiKey
+          GEMINI_MODEL: !Ref GeminiModel
       Policies:
         - DynamoDBCrudPolicy: {TableName: !Ref ReportsTable}
         - S3CrudPolicy: {BucketName: !Ref PhotosBucket}
