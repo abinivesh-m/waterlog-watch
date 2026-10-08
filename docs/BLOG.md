@@ -130,4 +130,4 @@ is effectively zero. When it pours, everything scales automatically.
 - **Live ward dashboard:** https://lwj4clgh53.execute-api.ap-south-1.amazonaws.com/dashboard
 - **API docs:** https://lwj4clgh53.execute-api.ap-south-1.amazonaws.com/docs
 
-*AI tools used: Claude helped generate code, set up the deployment and draft this post.*
+*Designed and built by Abinivesh M. Used Claude for coding assistance.*

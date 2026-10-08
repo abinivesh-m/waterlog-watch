@@ -43,5 +43,4 @@ SMS alerts for subscribed streets (Amazon SNS), IMD rainfall forecasts to predic
 data feed for the Greater Chennai Corporation's command centre.
 
 ## AI tools used
-Claude (Anthropic) helped generate code, set up the AWS deployment, and write these docs. Product decisions,
-testing on device and the demo are by the team.
+Designed and built by Abinivesh M. Used Claude for coding assistance.

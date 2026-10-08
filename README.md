@@ -123,4 +123,4 @@ cd backend && pip install -r requirements-dev.txt && pytest -q
 Abinivesh M
 
 ## AI tools used
-Claude (Anthropic) helped generate code, set up the AWS deployment and write the docs.
+Designed and built by Abinivesh M. Used Claude for coding assistance.
