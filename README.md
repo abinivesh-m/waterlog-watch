@@ -110,10 +110,6 @@ python scripts/seed_demo.py --clear  # remove them
 cd backend && pip install -r requirements-dev.txt && pytest -q
 ```
 
-## Docs
-- [Demo video script](docs/DEMO_SCRIPT.md)
-- [Submission write-up](docs/WRITEUP.md)
-
 ## What's next
 - SMS/WhatsApp alerts for subscribed streets (Amazon SNS / Pinpoint)
 - A ward-level dashboard for the Greater Chennai Corporation to dispatch pumps (Amazon QuickSight)
@@ -121,7 +117,7 @@ cd backend && pip install -r requirements-dev.txt && pytest -q
 
 ## Team
 Abinivesh M
-
+Abhinivesh K
 ## AI tools used
 Designed and built by Abinivesh M. Used Claude for coding assistance.
 
