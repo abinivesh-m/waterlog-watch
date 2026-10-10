@@ -3,15 +3,19 @@
 Use for the demo video when it isn't raining. Every seeded item has demo=True and its
 note starts with "[Demo]", so it's never confused with a real citizen report.
 
-    python scripts/seed_demo.py            # seed
-    python scripts/seed_demo.py --clear    # remove all demo items
-    python scripts/seed_demo.py --stack my-stack --region ap-south-1
+IDs are derived from the spot name, so re-running overwrites the same 12 items
+instead of creating duplicates. No --clear is needed between runs.
+
+    python scripts/seed_demo.py                 # seed (live for 36 h)
+    python scripts/seed_demo.py --hours 44      # live for 44 h (max)
+    python scripts/seed_demo.py --clear         # remove all demo items
+    python scripts/seed_demo.py --table NAME    # skip the CloudFormation lookup
 """
 import argparse
+import hashlib
 import random
 import sys
 import time
-import uuid
 from decimal import Decimal
 from pathlib import Path
 
@@ -61,9 +65,13 @@ def main():
     ap.add_argument("--stack", default="waterlog-watch")
     ap.add_argument("--region", default="ap-south-1")
     ap.add_argument("--clear", action="store_true")
+    ap.add_argument("--table", help="DynamoDB table name (skips the CloudFormation lookup)")
+    ap.add_argument("--hours", type=int, default=36, help="how long the spots stay live (max 44)")
     args = ap.parse_args()
 
-    table = boto3.resource("dynamodb", region_name=args.region).Table(table_name(args.stack, args.region))
+    args.hours = min(args.hours, 44)  # the API only reads reports created in the last 48 h
+    name_ = args.table or table_name(args.stack, args.region)
+    table = boto3.resource("dynamodb", region_name=args.region).Table(name_)
 
     if args.clear:
         n = 0
@@ -84,15 +92,16 @@ def main():
         created = now - random.randint(5, 150) * 60
         en, ta = summary(depth, cm, sev)
         table.put_item(Item={
-            "id": uuid.uuid4().hex[:12], "demo": True,
+            "id": hashlib.md5(name.encode()).hexdigest()[:12], "demo": True,
             "lat": Decimal(str(lat)), "lng": Decimal(str(lng)), "gh5": geohash(lat, lng, 5),
-            "created_at": created, "updated_at": created, "expires_at": now + 6 * 3600,
+            "created_at": created, "updated_at": created, "expires_at": now + args.hours * 3600,
             "status": "active", "note": f"[Demo] {name}", "photo_key": "", "reporter": "demo-seed",
             "voters": {"demo-seed"}, "still_there": random.randint(1, 9), "cleared": 0,
             "is_waterlogging": True, "depth": depth, "depth_cm_estimate": cm, "severity": sev,
             "passable": passable(sev), "hazards": hazards, "summary": en, "summary_local": ta,
         })
-    print(f"Seeded {len(SPOTS)} demo reports around Chennai (expire in 6 h). Remove with --clear.")
+    print(f"Seeded {len(SPOTS)} demo reports around Chennai (live for {args.hours} h). "
+          f"Re-run to refresh; remove with --clear.")
 
 
 if __name__ == "__main__":
